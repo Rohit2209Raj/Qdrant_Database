@@ -3,13 +3,18 @@
 # ============================================================
 
 from dotenv import load_dotenv
+
 from langchain_core.documents import Document
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_qdrant import QdrantVectorStore
 from langchain_groq import ChatGroq
 
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams
+from qdrant_client.models import (
+    Distance,
+    VectorParams,
+    PayloadSchemaType
+)
 
 import os
 import json
@@ -39,58 +44,11 @@ print("Connected to Qdrant Cloud!")
 
 
 # ============================================================
-# COLLECTION
+# COLLECTION CONFIGURATION
 # ============================================================
 
 COLLECTION_NAME = "knowledge_langchain"
 EMBEDDING_SIZE = 384
-
-
-if qdrant_client.collection_exists(COLLECTION_NAME):
-
-    print(f"Deleting existing collection: {COLLECTION_NAME}")
-
-    qdrant_client.delete_collection(
-        collection_name=COLLECTION_NAME
-    )
-
-
-qdrant_client.create_collection(
-    collection_name=COLLECTION_NAME,
-    vectors_config=VectorParams(
-        size=EMBEDDING_SIZE,
-        distance=Distance.COSINE
-    )
-)
-
-print(f"Created collection: {COLLECTION_NAME}")
-
-
-# ============================================================
-# LOAD KNOWLEDGE
-# ============================================================
-
-with open("knowledge.json", "r", encoding="utf-8") as f:
-    data = json.load(f)
-
-print(f"Loaded {len(data)} documents")
-
-
-# ============================================================
-# CONVERT TO LANGCHAIN DOCUMENTS
-# ============================================================
-
-documents = [
-    Document(
-        page_content=item["text"],
-        metadata={
-            "category": item["category"]
-        }
-    )
-    for item in data
-]
-
-print("Converted data into LangChain Documents")
 
 
 # ============================================================
@@ -105,23 +63,99 @@ print("Embedding model loaded")
 
 
 # ============================================================
-# VECTOR DATABASE
+# CREATE COLLECTION ONLY IF IT DOES NOT EXIST
 # ============================================================
 
-db = QdrantVectorStore(
-    client=qdrant_client,
-    collection_name=COLLECTION_NAME,
-    embedding=embeddings_model
-)
+if not qdrant_client.collection_exists(COLLECTION_NAME):
+
+    print(f"Collection does not exist.")
+
+    # --------------------------------------------------------
+    # CREATE COLLECTION
+    # --------------------------------------------------------
+
+    qdrant_client.create_collection(
+        collection_name=COLLECTION_NAME,
+        vectors_config=VectorParams(
+            size=EMBEDDING_SIZE,
+            distance=Distance.COSINE
+        )
+    )
+
+    print(f"Created collection: {COLLECTION_NAME}")
+
+    # --------------------------------------------------------
+    # CREATE PAYLOAD INDEX
+    # --------------------------------------------------------
+
+    qdrant_client.create_payload_index(
+        collection_name=COLLECTION_NAME,
+        field_name="metadata.category",
+        field_schema=PayloadSchemaType.KEYWORD
+    )
+
+    print("Created payload index: metadata.category")
+
+    # --------------------------------------------------------
+    # LOAD KNOWLEDGE
+    # --------------------------------------------------------
+
+    with open("knowledge.json", "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    print(f"Loaded {len(data)} documents")
+
+    # --------------------------------------------------------
+    # CONVERT TO LANGCHAIN DOCUMENTS
+    # --------------------------------------------------------
+
+    documents = [
+        Document(
+            page_content=item["text"],
+            metadata={
+                "category": item["category"]
+            }
+        )
+        for item in data
+    ]
+
+    print("Converted data into LangChain Documents")
+
+    # --------------------------------------------------------
+    # CONNECT LANGCHAIN WITH QDRANT
+    # --------------------------------------------------------
+
+    db = QdrantVectorStore(
+        client=qdrant_client,
+        collection_name=COLLECTION_NAME,
+        embedding=embeddings_model
+    )
+
+    # --------------------------------------------------------
+    # STORE DOCUMENTS
+    # --------------------------------------------------------
+
+    db.add_documents(documents)
+
+    print(f"Stored {len(documents)} documents in Qdrant")
 
 
 # ============================================================
-# STORE DOCUMENTS IN VECTOR DATABASE
+# IF COLLECTION ALREADY EXISTS
 # ============================================================
 
-db.add_documents(documents)
+else:
 
-print(f"Stored {len(documents)} documents in Qdrant")
+    print(f"Collection already exists: {COLLECTION_NAME}")
+    print("Connecting to existing Qdrant collection...")
+
+    db = QdrantVectorStore(
+        client=qdrant_client,
+        collection_name=COLLECTION_NAME,
+        embedding=embeddings_model
+    )
+
+    print("Connected to existing vector database")
 
 
 # ============================================================
@@ -147,13 +181,17 @@ retriever = db.as_retriever(
 
 
 # ============================================================
-# NORMAL SEARCH
+# USER QUERY
 # ============================================================
 
-query = input("Enter your query: ")
+query = input("\nEnter your query: ")
 
 print(f"\nOriginal Query: {query}")
 
+
+# ============================================================
+# NORMAL SEMANTIC SEARCH
+# ============================================================
 
 docs = retriever.invoke(query)
 
@@ -163,8 +201,16 @@ print("\n================ RETRIEVED DOCUMENTS ================")
 for i, doc in enumerate(docs, start=1):
 
     print(f"\nDocument {i}")
-    print(f"Category: {doc.metadata.get('category')}")
-    print(f"Content: {doc.page_content}")
+
+    print(
+        f"Category: "
+        f"{doc.metadata.get('category')}"
+    )
+
+    print(
+        f"Content: "
+        f"{doc.page_content}"
+    )
 
 
 # ============================================================
@@ -174,10 +220,12 @@ for i, doc in enumerate(docs, start=1):
 filtered_retriever = db.as_retriever(
     search_kwargs={
         "k": 3,
+
         "filter": {
             "must": [
                 {
                     "key": "metadata.category",
+
                     "match": {
                         "value": "reimbursement"
                     }
@@ -200,8 +248,16 @@ print("\n================ FILTERED RESULTS ================")
 for i, doc in enumerate(filtered_docs, start=1):
 
     print(f"\nDocument {i}")
-    print(f"Category: {doc.metadata.get('category')}")
-    print(f"Content: {doc.page_content}")
+
+    print(
+        f"Category: "
+        f"{doc.metadata.get('category')}"
+    )
+
+    print(
+        f"Content: "
+        f"{doc.page_content}"
+    )
 
 
 # ============================================================
@@ -240,6 +296,10 @@ If the answer is not present in the context, say:
 
 response = llm.invoke(prompt)
 
+
+# ============================================================
+# FINAL ANSWER
+# ============================================================
 
 print("\n================ FINAL ANSWER ================")
 
