@@ -66,15 +66,20 @@ print("Embedding model loaded")
 # CREATE COLLECTION ONLY IF IT DOES NOT EXIST
 # ============================================================
 
-if not qdrant_client.collection_exists(COLLECTION_NAME):
+# if not qdrant_client.collection_exists(COLLECTION_NAME):
 
-    print(f"Collection does not exist.")
+# print(f"Collection does not exist.")
 
     # --------------------------------------------------------
     # CREATE COLLECTION
     # --------------------------------------------------------
 
-    qdrant_client.create_collection(
+if qdrant_client.collection_exists(COLLECTION_NAME):
+    print(f"Deleting existing collection: {COLLECTION_NAME}")
+    qdrant_client.delete_collection(COLLECTION_NAME)
+
+
+qdrant_client.create_collection(
         collection_name=COLLECTION_NAME,
         vectors_config=VectorParams(
             size=EMBEDDING_SIZE,
@@ -82,34 +87,34 @@ if not qdrant_client.collection_exists(COLLECTION_NAME):
         )
     )
 
-    print(f"Created collection: {COLLECTION_NAME}")
+print(f"Created collection: {COLLECTION_NAME}")
 
     # --------------------------------------------------------
     # CREATE PAYLOAD INDEX
     # --------------------------------------------------------
 
-    qdrant_client.create_payload_index(
+qdrant_client.create_payload_index(
         collection_name=COLLECTION_NAME,
         field_name="metadata.category",
         field_schema=PayloadSchemaType.KEYWORD
     )
 
-    print("Created payload index: metadata.category")
+print("Created payload index: metadata.category")
 
     # --------------------------------------------------------
     # LOAD KNOWLEDGE
     # --------------------------------------------------------
 
-    with open("knowledge.json", "r", encoding="utf-8") as f:
+with open("knowledge.json", "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    print(f"Loaded {len(data)} documents")
+print(f"Loaded {len(data)} documents")
 
     # --------------------------------------------------------
     # CONVERT TO LANGCHAIN DOCUMENTS
     # --------------------------------------------------------
 
-    documents = [
+documents = [
         Document(
             page_content=item["text"],
             metadata={
@@ -119,13 +124,13 @@ if not qdrant_client.collection_exists(COLLECTION_NAME):
         for item in data
     ]
 
-    print("Converted data into LangChain Documents")
+print("Converted data into LangChain Documents")
 
     # --------------------------------------------------------
     # CONNECT LANGCHAIN WITH QDRANT
     # --------------------------------------------------------
 
-    db = QdrantVectorStore(
+db = QdrantVectorStore(
         client=qdrant_client,
         collection_name=COLLECTION_NAME,
         embedding=embeddings_model
@@ -135,32 +140,32 @@ if not qdrant_client.collection_exists(COLLECTION_NAME):
     # STORE DOCUMENTS
     # --------------------------------------------------------
 
-    db.add_documents(documents)
+db.add_documents(documents)
 
-    print(f"Stored {len(documents)} documents in Qdrant")
+print(f"Stored {len(documents)} documents in Qdrant")
 
 
 # ============================================================
 # IF COLLECTION ALREADY EXISTS
 # ============================================================
 
-else:
+# else:
 
-    print(f"Collection already exists: {COLLECTION_NAME}")
-    print("Connecting to existing Qdrant collection...")
+#     print(f"Collection already exists: {COLLECTION_NAME}")
+#     print("Connecting to existing Qdrant collection...")
 
-    db = QdrantVectorStore(
-        client=qdrant_client,
-        collection_name=COLLECTION_NAME,
-        embedding=embeddings_model
-    )
+#     db = QdrantVectorStore(
+#         client=qdrant_client,
+#         collection_name=COLLECTION_NAME,
+#         embedding=embeddings_model
+#     )
 
-    print("Connected to existing vector database")
+#     print("Connected to existing vector database")
 
 
-# ============================================================
-# LLM
-# ============================================================
+# # ============================================================
+# # LLM
+# # ============================================================
 
 llm = ChatGroq(
     model="openai/gpt-oss-120b",
